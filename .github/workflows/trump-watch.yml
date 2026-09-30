@@ -1,0 +1,44 @@
+name: Trump stock watch
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # every ~5 min (GitHub may delay runs by several minutes)
+    - cron: '3 13 * * *'    # daily report, 13:03 UTC = about 8 AM US Central (daylight time)
+  workflow_dispatch:         # "Run workflow" button for testing (sends the daily report)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trump-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: trump_requirements.txt
+      - run: pip install -r trump_requirements.txt
+      - name: Run watcher
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "${{ github.event.schedule }}" = "3 13 * * *" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python trump_stock_watch.py --daily
+          else
+            python trump_stock_watch.py
+          fi
+      - name: Save seen items
+        run: |
+          git config user.name "watch-bot"
+          git config user.email "watch-bot@users.noreply.github.com"
+          git add seen_trump.json || true
+          git diff --staged --quiet || (git commit -m "update seen" && git pull --rebase && git push)
